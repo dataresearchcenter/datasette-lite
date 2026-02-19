@@ -71,9 +71,9 @@ body {
     font-size: 1rem;
     font-weight: 400;
     line-height: 1.5;
-    color: #111A35;
+    color: #1A1A1A;
     text-align: left;
-    background-color: #F8FAFB;
+    background-color: #FFF8F1;
 }
 
 /* Helper Styles  ===========================================================*/
@@ -194,17 +194,17 @@ footer,
 }
 
 a:link {
-	color: #276890;
+	color: #FF5F33;
 	text-decoration: underline;
 }
 a:visited {
-	color: #54AC8E;
+	color: #32383E;
 	text-decoration: underline;
 }
 a:hover,
 a:focus,
 a:active  {
-	color: #67C98D;
+	color: #FF5F33;
 	text-decoration: underline;
 }
 
@@ -212,14 +212,14 @@ button.button-as-link {
     background: none;
     border: none;
     padding: 0;
-    color: #276890;
+    color: #FF5F33;
     text-decoration: underline;
     cursor: pointer;
     font-size: 1rem;
 }
 button.button-as-link:hover,
 button.button-as-link:focus {
-	color: #67C98D;
+	color: #FF5F33;
 }
 
 a img {
@@ -268,8 +268,8 @@ a.not-underlined {
 header,
 footer {
     padding: 0.6rem 1rem 0.5rem 1rem;
-    background-color: #276890;
-    background: linear-gradient(180deg, rgba(96,144,173,1) 0%, rgba(39,104,144,1) 50%);
+    background-color: #FF5F33;
+    background: linear-gradient(180deg, rgba(255,95,51,0.8) 0%, rgba(255,95,51,1) 50%);
     color: rgba(255,255,244,0.9);
     overflow: hidden;
     box-sizing: border-box;
@@ -350,7 +350,7 @@ details .nav-menu-inner {
     top: 2.6rem;
     right: 10px;
     width: 180px;
-    background-color: #276890;
+    background-color: #FF5F33;
     z-index: 1000;
     padding: 0;
 }

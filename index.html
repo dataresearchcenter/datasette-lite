@@ -30,8 +30,6 @@ textarea#sql-editor {
   line-height: 1.4;
 }
 </style>
-<script defer data-domain="lite.datasette.io" src="https://plausible.io/js/script.manual.js"></script>
-<script>window.plausible = window.plausible || function() { (window.plausible.q = window.plausible.q || []).push(arguments) }</script>
 </head>
 <body>
 
@@ -117,9 +115,11 @@ const sqlUrls = urlParams.getAll('sql').map(fixUrl);
 const jsonUrls = urlParams.getAll('json').map(fixUrl);
 const parquetUrls = urlParams.getAll('parquet').map(fixUrl);
 const installUrls = urlParams.getAll('install');
+const fts = urlParams.get('fts');
+const skiprows = urlParams.get('skiprows');
 const ref = urlParams.get('ref');
 
-datasetteWorker.postMessage({type: 'startup', ref, sqliteUrl, memory, csvUrls, sqlUrls, jsonUrls, parquetUrls, installUrls, metadataUrl});
+datasetteWorker.postMessage({type: 'startup', ref, sqliteUrl, memory, csvUrls, sqlUrls, jsonUrls, parquetUrls, installUrls, metadataUrl, skiprows, fts});
 
 let loadingLogs = ["Loading..."];
 
@@ -174,8 +174,7 @@ datasetteWorker.onmessage = (event) => {
 </form>
 
 <script>
-const useAnalytics = (location.hostname == "lite.datasette.io") && (new URLSearchParams(location.search).get('analytics') != 'off');
-useAnalytics && plausible('pageview');
+// const useAnalytics = (location.hostname == "lite.datasette.io") && (new URLSearchParams(location.search).get('analytics') != 'off');
 
 window.onpopstate = function(event) {
   console.log(event);
@@ -213,7 +212,6 @@ function loadPath(path) {
   path = path.split("#")[0].replace("http://localhost", "");
   console.log({path});
   history.pushState({path: path}, path, "#" + path);
-  useAnalytics && plausible('pageview', {u: location.href.replace('?', '').replace('#', '/')});
   datasetteWorker.postMessage({path});
 }
 

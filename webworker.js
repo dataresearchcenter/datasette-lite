@@ -52,178 +52,209 @@ async function startDatasette(settings) {
   await pyodide.loadPackage('setuptools', {messageCallback: log}); // For pkg_resources
   try {
     await self.pyodide.runPythonAsync(`
-    # https://github.com/pyodide/pyodide/issues/3880#issuecomment-1560130092
-    import os, sys
-    import csv
-    os.link = os.symlink
+# https://github.com/pyodide/pyodide/issues/3880#issuecomment-1560130092
+import os, sys
+import csv
+os.link = os.symlink
 
-    # Increase CSV field size limit to maximim possible
-    # https://stackoverflow.com/a/15063941
-    field_size_limit = sys.maxsize
+# Increase CSV field size limit to maximim possible
+# https://stackoverflow.com/a/15063941
+field_size_limit = sys.maxsize
 
-    while True:
-        try:
-            csv.field_size_limit(field_size_limit)
-            break
-        except OverflowError:
-            field_size_limit = int(field_size_limit / 10)
+while True:
+    try:
+        csv.field_size_limit(field_size_limit)
+        break
+    except OverflowError:
+        field_size_limit = int(field_size_limit / 10)
 
-    import sqlite3
-    from pyodide.http import pyfetch
-    names = []
-    for name, url in ${JSON.stringify(toLoad)}:
-        if url:
-            response = await pyfetch(url)
-            with open(name, "wb") as fp:
-                fp.write(await response.bytes())
-        else:
-            sqlite3.connect(name).execute("vacuum")
-        names.append(name)
+import sqlite3
+from pyodide.http import pyfetch
+names = []
+for name, url in ${JSON.stringify(toLoad)}:
+    if url:
+        response = await pyfetch(url)
+        with open(name, "wb") as fp:
+            fp.write(await response.bytes())
+    else:
+        sqlite3.connect(name).execute("vacuum")
+    names.append(name)
 
-    import micropip
-    # Workaround for Requested 'h11<0.13,>=0.11', but h11==0.13.0 is already installed
-    await micropip.install("h11==0.12.0")
-    await micropip.install("httpx==0.23")
-    await micropip.install("python-multipart==0.0.15")
-    # To avoid possible 'from typing_extensions import deprecated' error:
-    await micropip.install('typing-extensions>=4.12.2')
-    await micropip.install("${datasetteToInstall}", pre=${pre})
-    # Install any extra ?install= dependencies
-    install_urls = ${JSON.stringify(settings.installUrls)}
-    if install_urls:
-        for install_url in install_urls:
-            await micropip.install(install_url)
-    # Execute any ?sql=URL SQL
-    sqls = ${JSON.stringify(sources.filter(source => source[0] === "sql")[0]?.[1] || [])}
-    if sqls:
-        for sql_url in sqls:
-            # Fetch that SQL and execute it
-            response = await pyfetch(sql_url)
-            sql = await response.string()
-            sqlite3.connect("data.db").executescript(sql)
-    metadata = {
-        "about": "Datasette Lite",
-        "about_url": "https://github.com/simonw/datasette-lite"
-    }
-    metadata_url = ${JSON.stringify(settings.metadataUrl || '')}
-    if metadata_url:
-        response = await pyfetch(metadata_url)
-        content = await response.string()
-        from datasette.utils import parse_metadata
-        metadata = parse_metadata(content)
+import micropip
+# Workaround for Requested 'h11<0.13,>=0.11', but h11==0.13.0 is already installed
+await micropip.install("h11==0.12.0")
+await micropip.install("httpx==0.23")
+await micropip.install("python-multipart==0.0.15")
+# To avoid possible 'from typing_extensions import deprecated' error:
+await micropip.install('typing-extensions>=4.12.2')
+await micropip.install("${datasetteToInstall}", pre=${pre})
+# Install any extra ?install= dependencies
+install_urls = ${JSON.stringify(settings.installUrls || [])}
+if install_urls:
+    for install_url in install_urls:
+        await micropip.install(install_url)
+# Execute any ?sql=URL SQL
+sqls = ${JSON.stringify(sources.filter(source => source[0] === "sql")[0]?.[1] || [])}
+if sqls:
+    for sql_url in sqls:
+        # Fetch that SQL and execute it
+        response = await pyfetch(sql_url)
+        sql = await response.string()
+        sqlite3.connect("data.db").executescript(sql)
+metadata = {
+    "about": "Datasette Lite",
+    "about_url": "https://github.com/simonw/datasette-lite"
+}
+metadata_url = ${JSON.stringify(settings.metadataUrl || '')}
+if metadata_url:
+    response = await pyfetch(metadata_url)
+    content = await response.string()
+    from datasette.utils import parse_metadata
+    metadata = parse_metadata(content)
 
-    # Import data from ?csv=URL CSV files/?json=URL JSON files
-    sources = ${JSON.stringify(sources.filter(source => ['csv', 'json', 'parquet'].includes(source[0])))}
-    if sources:
-        await micropip.install("sqlite-utils==3.28")
-        import sqlite_utils, json
-        from sqlite_utils.utils import rows_from_file, TypeTracker, Format
-        db = sqlite_utils.Database("data.db")
-        table_names = set()
-        for source_type, urls in sources:
-            for url in urls:
-                # Derive table name from URL
-                bit = url.split("/")[-1].split(".")[0].split("?")[0]
-                bit = bit.strip()
-                if not bit:
-                    bit = "table"
-                prefix = 0
-                base_bit = bit
-                while bit in table_names:
-                    prefix += 1
-                    bit = "{}_{}".format(base_bit, prefix)
-                table_names.add(bit)
+# Import data from ?csv=URL CSV files/?json=URL JSON files
+sources = ${JSON.stringify(sources.filter(source => ['csv', 'json', 'parquet'].includes(source[0])))}
+if sources:
+    await micropip.install("sqlite-utils==3.28")
+    import sqlite_utils, json
+    from sqlite_utils.utils import rows_from_file, TypeTracker, Format
+    db = sqlite_utils.Database("data.db")
+    table_names = set()
+    fts = ${JSON.stringify(settings.fts || "false")}
+    for source_type, urls in sources:
+        for url in urls:
+            # Derive table name from URL
+            bit = url.split("/")[-1].split(".")[0].split("?")[0]
+            bit = bit.strip()
+            if not bit:
+                bit = "table"
+            prefix = 0
+            base_bit = bit
+            while bit in table_names:
+                prefix += 1
+                bit = "{}_{}".format(base_bit, prefix)
+            table_names.add(bit)
 
-                if source_type == "csv":
-                    tracker = TypeTracker()
-                    response = await pyfetch(url)
-                    csv_bytes = await response.bytes()
-                    with open("csv.csv", "wb") as fp:
-                        fp.write(csv_bytes)
+            if source_type == "csv":
+                tracker = TypeTracker()
+                response = await pyfetch(url)
+                csv_bytes = await response.bytes()
 
-                    # Auto-detect CSV delimiter (comma vs semicolon)
-                    # Read first few lines to detect the delimiter
-                    sample_lines = []
-                    lines_iter = iter(csv_bytes.decode('utf-8', errors='ignore').splitlines())
-                    for _ in range(min(5, len(csv_bytes.decode('utf-8', errors='ignore').splitlines()))):
-                        try:
-                            sample_lines.append(next(lines_iter))
-                        except StopIteration:
-                            break
+                skiprows = int(${JSON.stringify(settings.skiprows || 0)})
 
-                    # Count semicolons vs commas in the sample
-                    semicolon_count = sum(line.count(';') for line in sample_lines)
-                    comma_count = sum(line.count(',') for line in sample_lines)
+                # Apply skiprows by preprocessing the CSV file if needed
+                csv_lines = csv_bytes.decode('utf-8', errors='ignore').splitlines()
+                if len(csv_lines) > skiprows and skiprows > 0:
+                    csv_lines = csv_lines[skiprows:]
+                    csv_bytes = '\\n'.join(csv_lines).encode('utf-8')
+                with open("csv.csv", "wb") as fp:
+                    fp.write(csv_bytes)
 
-                    # Determine the most likely delimiter
-                    if semicolon_count > comma_count and semicolon_count > 0:
-                        # Use semicolon as delimiter
-                        # We need to manually parse CSV with semicolon delimiter
-                        import csv as csv_module
-                        from io import StringIO
+                # Auto-detect CSV delimiter (comma vs semicolon)
+                # Read first few lines to detect the delimiter
+                sample_lines = []
+                lines_iter = iter(csv_bytes.decode('utf-8', errors='ignore').splitlines())
+                for _ in range(min(5, len(csv_bytes.decode('utf-8', errors='ignore').splitlines()))):
+                    try:
+                        sample_lines.append(next(lines_iter))
+                    except StopIteration:
+                        break
 
-                        csv_content = csv_bytes.decode('utf-8', errors='ignore')
-                        csv_reader = csv_module.reader(StringIO(csv_content), delimiter=';')
-                        rows = list(csv_reader)
+                # Count semicolons vs commas in the sample
+                semicolon_count = sum(line.count(';') for line in sample_lines)
+                comma_count = sum(line.count(',') for line in sample_lines)
 
-                        if rows:
-                            # Convert to format expected by sqlite-utils
-                            headers = rows[0]
-                            data_rows = rows[1:]
-                            dict_rows = [dict(zip(headers, row)) for row in data_rows]
+                # Determine the most likely delimiter
+                if semicolon_count > comma_count and semicolon_count > 0:
+                    # Use semicolon as delimiter
+                    # We need to manually parse CSV with semicolon delimiter
+                    import csv as csv_module
+                    from io import StringIO
 
-                            db[bit].insert_all(
-                                tracker.wrap(dict_rows),
-                                alter=True
-                            )
-                    else:
-                        # Use default comma delimiter
+                    csv_content = csv_bytes.decode('utf-8', errors='ignore')
+                    csv_reader = csv_module.reader(StringIO(csv_content), delimiter=';')
+                    rows = list(csv_reader)
+
+                    if rows:
+                        # Convert to format expected by sqlite-utils
+                        headers = rows[0]
+                        data_rows = rows[1:]
+                        dict_rows = [dict(zip(headers, row)) for row in data_rows]
+
                         db[bit].insert_all(
-                            tracker.wrap(rows_from_file(open("csv.csv", "rb"), Format.CSV)[0]),
+                            tracker.wrap(dict_rows),
                             alter=True
                         )
-
-                    db[bit].transform(
-                        types=tracker.types
+                else:
+                    # Use default comma delimiter
+                    db[bit].insert_all(
+                        tracker.wrap(rows_from_file(open("csv.csv", "rb"), Format.CSV)[0]),
+                        alter=True
                     )
-                elif source_type == "json":
-                    pk = None
-                    response = await pyfetch(url)
-                    with open("json.json", "wb") as fp:
-                        json_bytes = await response.bytes()
-                        try:
-                            json_data = json.loads(json_bytes)
-                        except json.decoder.JSONDecodeError:
-                            # Maybe it's newline-delimited JSON?
-                            # This will raise an unhandled exception if not
-                            json_data = [json.loads(line) for line in json_bytes.splitlines()]
-                    if isinstance(json_data, dict) and all(isinstance(v, dict) for v in json_data.values()):
-                        fixed = []
-                        pk = "_key"
-                        for key, value in json_data.items():
-                            value["_key"] = key
-                            fixed.append(value)
-                        json_data = fixed
-                    elif isinstance(json_data, dict) and any(isinstance(v, list) for v in json_data.values()):
-                        for key, value in json_data.items():
-                            if isinstance(value, list) and value and isinstance(value[0], dict):
-                                json_data = value
-                                break
-                    assert isinstance(json_data, list), "JSON data must be a list of objects"
-                    db[bit].insert_all(json_data, pk=pk, alter=True)
-                elif source_type == "parquet":
-                    await micropip.install("fastparquet")
-                    import fastparquet
-                    response = await pyfetch(url)
-                    with open("parquet.parquet", "wb") as fp:
-                        fp.write(await response.bytes())
-                    df = fastparquet.ParquetFile("parquet.parquet").to_pandas()
-                    db[bit].insert_all(df.to_dict(orient="records"), alter=True)
-    from datasette.app import Datasette
-    ds = Datasette(names, settings={
-        "num_sql_threads": 0,
-    }, metadata=metadata, memory=${settings.memory ? 'True' : 'False'})
-    await ds.invoke_startup()
+
+                db[bit].transform(
+                    types=tracker.types
+                )
+                
+                # Enable FTS if requested
+                if fts == "true":
+                    # Get all text columns for FTS
+                    columns = [col.name for col in db[bit].columns if col.type in ('TEXT', 'VARCHAR', 'CHAR')]
+                    if columns:
+                        db[bit].enable_fts(columns)
+            elif source_type == "json":
+                pk = None
+                response = await pyfetch(url)
+                with open("json.json", "wb") as fp:
+                    json_bytes = await response.bytes()
+                    try:
+                        json_data = json.loads(json_bytes)
+                    except json.decoder.JSONDecodeError:
+                        # Maybe it's newline-delimited JSON?
+                        # This will raise an unhandled exception if not
+                        json_data = [json.loads(line) for line in json_bytes.splitlines()]
+                if isinstance(json_data, dict) and all(isinstance(v, dict) for v in json_data.values()):
+                    fixed = []
+                    pk = "_key"
+                    for key, value in json_data.items():
+                        value["_key"] = key
+                        fixed.append(value)
+                    json_data = fixed
+                elif isinstance(json_data, dict) and any(isinstance(v, list) for v in json_data.values()):
+                    for key, value in json_data.items():
+                        if isinstance(value, list) and value and isinstance(value[0], dict):
+                            json_data = value
+                            break
+                assert isinstance(json_data, list), "JSON data must be a list of objects"
+                db[bit].insert_all(json_data, pk=pk, alter=True)
+                
+                # Enable FTS if requested
+                if fts == "true":
+                    # Get all text columns for FTS
+                    columns = [col.name for col in db[bit].columns if col.type in ('TEXT', 'VARCHAR', 'CHAR')]
+                    if columns:
+                        db[bit].enable_fts(columns)
+            elif source_type == "parquet":
+                await micropip.install("fastparquet")
+                import fastparquet
+                response = await pyfetch(url)
+                with open("parquet.parquet", "wb") as fp:
+                    fp.write(await response.bytes())
+                df = fastparquet.ParquetFile("parquet.parquet").to_pandas()
+                db[bit].insert_all(df.to_dict(orient="records"), alter=True)
+                
+                # Enable FTS if requested
+                if fts == "true":
+                    # Get all text columns for FTS
+                    columns = [col.name for col in db[bit].columns if col.type in ('TEXT', 'VARCHAR', 'CHAR')]
+                    if columns:
+                        db[bit].enable_fts(columns)
+from datasette.app import Datasette
+ds = Datasette(names, settings={
+    "num_sql_threads": 0,
+    "suggest_facets": "off",
+}, metadata=metadata, memory=${settings.memory ? 'True' : 'False'})
+await ds.invoke_startup()
     `);
     datasetteLiteReady();
   } catch (error) {
