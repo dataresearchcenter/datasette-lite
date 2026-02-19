@@ -1,3 +1,5 @@
+This fork is slightly adjusted to accept ?fts=true/false and skiprows=N parameters in the url for full text search and optional skipping of first n rows.
+
 # Datasette Lite
 
 Datasette running in your browser using WebAssembly and [Pyodide](https://pyodide.org)
