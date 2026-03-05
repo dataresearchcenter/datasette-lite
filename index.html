@@ -14,13 +14,13 @@
   height: 40vh;
   width: 90%;
   padding: 1em;
-  background-color: #276890;
+  background-color: #1c2127;
   color: white;
-  border: 1px solid black;
+  border: 1px solid #5f6b7c;
   overflow: auto;
   outline: none;
   resize: none;
-  opacity: 0.6;
+  opacity: 0.9;
   font-size: min(3vw, 1.2em);
   line-height: 1.8;
 }
@@ -32,6 +32,12 @@ textarea#sql-editor {
 </style>
 </head>
 <body>
+
+<header>
+  <div class="crumbs">
+    <p><strong>Datasette</strong></p>
+  </div>
+</header>
 
 <div id="loading-indicator">
   <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
