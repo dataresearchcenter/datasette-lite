@@ -6,16 +6,7 @@ function log(line) {
 }
 
 async function startDatasette(settings) {
-  // Which version of Datasette to install?
-  let datasetteToInstall = 'datasette';
-  let pre = 'False';
-  if (settings.ref) {
-    if (settings.ref == 'pre') {
-      pre = 'True';
-    } else {
-      datasetteToInstall = `datasette==${settings.ref}`;
-    }
-  }
+  // Using pinned Datasette version for stability
   
   // Check if CSV URLs are provided
   if (!settings.csvUrls || settings.csvUrls.length === 0) {
@@ -23,15 +14,11 @@ async function startDatasette(settings) {
     return;
   }
   
-  // Create main database for CSV data
-  let toLoad = [["main.db", 0]];
   self.pyodide = await loadPyodide({
     indexURL: "https://cdn.jsdelivr.net/pyodide/v0.27.2/full/",
     fullStdLib: true
   });
   await pyodide.loadPackage('micropip', {messageCallback: log});
-  await pyodide.loadPackage('ssl', {messageCallback: log});
-  await pyodide.loadPackage('setuptools', {messageCallback: log}); // For pkg_resources
   try {
     await self.pyodide.runPythonAsync(`
 # https://github.com/pyodide/pyodide/issues/3880#issuecomment-1560130092
@@ -52,34 +39,19 @@ while True:
 
 import sqlite3
 from pyodide.http import pyfetch
-names = []
-for name, url in ${JSON.stringify(toLoad)}:
-    if url:
-        response = await pyfetch(url)
-        with open(name, "wb") as fp:
-            fp.write(await response.bytes())
-    else:
-        sqlite3.connect(name).execute("vacuum")
-    names.append(name)
+# Create main database
+sqlite3.connect("main.db").execute("vacuum")
+names = ["main.db"]
 
 import micropip
-# Workaround for Requested 'h11<0.13,>=0.11', but h11==0.13.0 is already installed
-await micropip.install("h11==0.12.0")
-await micropip.install("httpx==0.23")
-await micropip.install("python-multipart==0.0.15")
-# To avoid possible 'from typing_extensions import deprecated' error:
-await micropip.install('typing-extensions>=4.12.2')
-await micropip.install("${datasetteToInstall}", pre=${pre})
-# Install any extra ?install= dependencies
-install_urls = ${JSON.stringify(settings.installUrls || [])}
-if install_urls:
-    for install_url in install_urls:
-        await micropip.install(install_url)
+# Pin known working versions for stability
+await micropip.install("datasette==1.0a14")
+await micropip.install("sqlite-utils==3.39")
 
 # Import single CSV file
 csv_urls = ${JSON.stringify(settings.csvUrls || [])}
 if csv_urls:
-    await micropip.install("sqlite-utils==3.28")
+    # Process single CSV file with pinned sqlite-utils
     import sqlite_utils, csv as csv_module
     from sqlite_utils.utils import TypeTracker
     from io import StringIO
@@ -124,7 +96,6 @@ if csv_urls:
                 seen[header] = 1
         
         data_rows = rows[1:]
-        print(headers)
         dict_rows = [dict(zip(headers, row)) for row in data_rows]
         
         db["table"].insert_all(tracker.wrap(dict_rows), alter=True)
@@ -143,12 +114,11 @@ metadata = {
 ds = Datasette(names, settings={
     "num_sql_threads": 0,
     "suggest_facets": 0,
-    "allow_downloads": 0,
-    "allow_csv_stream": 0,
-}, metadata=metadata, memory=${settings.memory ? 'True' : 'False'})
+}, metadata=metadata)
 await ds.invoke_startup()
     `);
     datasetteLiteReady();
+    self.postMessage({type: 'ready'});
   } catch (error) {
     self.postMessage({error: error.message});
   }
