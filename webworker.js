@@ -178,6 +178,17 @@ if sources:
                     if rows:
                         # Convert to format expected by sqlite-utils
                         headers = rows[0]
+                        # Ensure header values are unique
+                        seen = {}
+                        unique_headers = []
+                        for header in headers:
+                            if header in seen:
+                                seen[header] += 1
+                                unique_headers.append(f"{header}_{seen[header]}")
+                            else:
+                                seen[header] = 0
+                                unique_headers.append(header)
+                        headers = unique_headers
                         data_rows = rows[1:]
                         dict_rows = [dict(zip(headers, row)) for row in data_rows]
 
