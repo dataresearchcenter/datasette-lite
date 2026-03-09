@@ -29,13 +29,27 @@ textarea#sql-editor {
   font-size: 1em;
   line-height: 1.4;
 }
+/* Override complex header navigation - simple centered header only */
+header .crumbs {
+  float: none !important;
+}
+header .actor {
+  display: none !important;
+}
+details.nav-menu {
+  display: none !important;
+}
+/* Hide dynamically generated breadcrumb navigation */
+p.crumbs {
+  display: none !important;
+}
 </style>
 </head>
 <body>
 
 <header>
   <div class="crumbs">
-    <p><strong>Datasette</strong></p>
+    <p style="text-align: center;"><strong>OpenAleph Table Viewer</strong></p>
   </div>
 </header>
 
@@ -168,16 +182,11 @@ datasetteWorker.onmessage = (event) => {
 
 <div id="output"></div>
 
-<form id="load-custom">
-  <p style="padding: 1em">
-    <button type="button" class="db-url">Load SQLite DB by URL</button>
-    <button type="button" class="csv-url">Load CSV</button>
-    <button type="button" class="json-url">Load JSON</button>
-    <button type="button" class="parquet-url">Load Parquet</button>
-    <button type="button" class="sql-url">Load SQL</button>
-    <a style="text-decoration: none; padding-left: 0.3em; color: #067EFF" href="https://github.com/simonw/datasette-lite">Documentation</a>
+<footer id="documentation">
+  <p style="padding: 1em; text-align: center;">
+    <a style="text-decoration: none; color: #ccc;" href="https://github.com/simonw/datasette-lite">Built on Datasette Lite</a>
   </p>
-</form>
+</footer>
 
 <script>
 // const useAnalytics = (location.hostname == "lite.datasette.io") && (new URLSearchParams(location.search).get('analytics') != 'off');
@@ -257,65 +266,8 @@ output.addEventListener('submit', (ev => {
   }
 }), true);
 
-async function checkUrl(url, contentTypes) {
-  try {
-    response = (await fetch(url, {method: 'HEAD'}));
-    if (response.status != 200) {
-      return false;
-    }
-    if (contentTypes && (!contentTypes.includes(response.headers.get('content-type')))) {
-      return false;
-    }
-    return true;
-  } catch (error) {
-    console.error(error);
-    return false;
-  }
-}
 
-const fileTypes = [
-  {
-    id: "db-url",
-    prompt: "Enter a full URL to a SQLite .db file",
-    param: "url",
-    mimes: [
-      "application/octet-stream",
-      "application/x-sqlite3",
-      "application/vnd.sqlite3",
-    ],
-  },
-  { id: "csv-url", prompt: "Enter a full URL to a CSV file", param: "csv" },
-  { id: "json-url", prompt: "Enter a full URL to a JSON file", param: "json" },
-  {
-    id: "parquet-url",
-    prompt: "Enter a full URL to a Parquet file",
-    param: "parquet",
-  },
-  { id: "sql-url", prompt: "Enter a full URL to a SQL file", param: "sql" },
-];
-
-fileTypes.forEach((fileType) => {
-  document
-    .querySelector(`#load-custom button.${fileType.id}`)
-    .addEventListener("click", async function (ev) {
-      ev.preventDefault();
-      let url = fixUrl(prompt(fileType.prompt));
-      if (!url) {
-        return;
-      }
-      let valid = await checkUrl(url, fileType.mimes);
-      if (valid) {
-        location.href =
-          location.pathname +
-          "?" +
-          fileType.param +
-          "=" +
-          encodeURIComponent(url);
-      } else {
-        alert(`That ${fileType.param.toUpperCase()} could not be loaded`);
-      }
-    });
-});
+// Load buttons removed - now CSV-only via URL parameters
 
 </script>
 </body>

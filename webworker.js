@@ -6,10 +6,6 @@ function log(line) {
 }
 
 async function startDatasette(settings) {
-  let toLoad = [];
-  let sources = [];
-  let needsDataDb = false;
-  let shouldLoadDefaults = true;
   // Which version of Datasette to install?
   let datasetteToInstall = 'datasette';
   let pre = 'False';
@@ -20,29 +16,15 @@ async function startDatasette(settings) {
       datasetteToInstall = `datasette==${settings.ref}`;
     }
   }
-  console.log({datasetteToInstall});
-  if (settings.sqliteUrl) {
-    let name = settings.sqliteUrl.split('.db')[0].split('/').slice(-1)[0];
-    toLoad.push([name, settings.sqliteUrl]);
-    shouldLoadDefaults = false;
+  
+  // Check if CSV URLs are provided
+  if (!settings.csvUrls || settings.csvUrls.length === 0) {
+    self.postMessage({error: 'No CSV file provided. Please add a CSV URL using ?csv=URL parameter.'});
+    return;
   }
-  ['csv', 'sql', 'json', 'parquet'].forEach(sourceType => {
-    if (settings[`${sourceType}Urls`] && settings[`${sourceType}Urls`].length) {
-      sources.push([sourceType, settings[`${sourceType}Urls`]]);
-      needsDataDb = true;
-      shouldLoadDefaults = false;
-    }
-  });
-  if (settings.memory) {
-    shouldLoadDefaults = false;
-  }
-  if (needsDataDb) {
-    toLoad.push(["data.db", 0]);
-  }
-  if (shouldLoadDefaults) {
-    toLoad.push(["fixtures.db", "https://latest.datasette.io/fixtures.db"]);
-    toLoad.push(["content.db", "https://datasette.io/content.db"]);
-  }
+  
+  // Create main database for CSV data
+  let toLoad = [["main.db", 0]];
   self.pyodide = await loadPyodide({
     indexURL: "https://cdn.jsdelivr.net/pyodide/v0.27.2/full/",
     fullStdLib: true
@@ -93,174 +75,76 @@ install_urls = ${JSON.stringify(settings.installUrls || [])}
 if install_urls:
     for install_url in install_urls:
         await micropip.install(install_url)
-# Execute any ?sql=URL SQL
-sqls = ${JSON.stringify(sources.filter(source => source[0] === "sql")[0]?.[1] || [])}
-if sqls:
-    for sql_url in sqls:
-        # Fetch that SQL and execute it
-        response = await pyfetch(sql_url)
-        sql = await response.string()
-        sqlite3.connect("data.db").executescript(sql)
+
+# Import single CSV file
+csv_urls = ${JSON.stringify(settings.csvUrls || [])}
+if csv_urls:
+    await micropip.install("sqlite-utils==3.28")
+    import sqlite_utils, csv as csv_module
+    from sqlite_utils.utils import TypeTracker
+    from io import StringIO
+    
+    db = sqlite_utils.Database("main.db")
+    fts = ${JSON.stringify(settings.fts || "false")}
+    
+    # Process single CSV file
+    url = csv_urls[0]
+    tracker = TypeTracker()
+    response = await pyfetch(url)
+    csv_bytes = await response.bytes()
+    
+    skiprows = int(${JSON.stringify(settings.skiprows || 0)})
+    
+    # Apply skiprows
+    csv_lines = csv_bytes.decode('utf-8', errors='ignore').splitlines()
+    if len(csv_lines) > skiprows and skiprows > 0:
+        csv_lines = csv_lines[skiprows:]
+    
+    csv_content = '\\n'.join(csv_lines)
+    
+    # Auto-detect delimiter
+    sample = '\\n'.join(csv_lines[:5])
+    semicolon_count = sample.count(';')
+    comma_count = sample.count(',')
+    delimiter = ';' if semicolon_count > comma_count and semicolon_count > 0 else ','
+    
+    # Parse CSV
+    csv_reader = csv_module.reader(StringIO(csv_content), delimiter=delimiter)
+    rows = list(csv_reader)
+    
+    if rows:
+        # Deduplicate headers
+        headers = [h.lower() for h in rows[0]]
+        seen = {}
+        for i, header in enumerate(headers):
+            if header in seen:
+                seen[header] += 1
+                headers[i] = f"{header}_{seen[header]}"
+            else:
+                seen[header] = 1
+        
+        data_rows = rows[1:]
+        print(headers)
+        dict_rows = [dict(zip(headers, row)) for row in data_rows]
+        
+        db["table"].insert_all(tracker.wrap(dict_rows), alter=True)
+        db["table"].transform(types=tracker.types)
+        
+        # Enable FTS if requested
+        if fts == "true":
+            columns = [col.name for col in db["table"].columns if col.type in ('TEXT', 'VARCHAR', 'CHAR')]
+            if columns:
+                db["table"].enable_fts(columns)
+from datasette.app import Datasette
 metadata = {
-    "about": "Datasette Lite",
+    "about": "CSV Viewer",
     "about_url": "https://github.com/simonw/datasette-lite"
 }
-metadata_url = ${JSON.stringify(settings.metadataUrl || '')}
-if metadata_url:
-    response = await pyfetch(metadata_url)
-    content = await response.string()
-    from datasette.utils import parse_metadata
-    metadata = parse_metadata(content)
-
-# Import data from ?csv=URL CSV files/?json=URL JSON files
-sources = ${JSON.stringify(sources.filter(source => ['csv', 'json', 'parquet'].includes(source[0])))}
-if sources:
-    await micropip.install("sqlite-utils==3.28")
-    import sqlite_utils, json
-    from sqlite_utils.utils import rows_from_file, TypeTracker, Format
-    db = sqlite_utils.Database("data.db")
-    table_names = set()
-    fts = ${JSON.stringify(settings.fts || "false")}
-    for source_type, urls in sources:
-        for url in urls:
-            # Derive table name from URL
-            bit = url.split("/")[-1].split(".")[0].split("?")[0]
-            bit = bit.strip()
-            if not bit:
-                bit = "table"
-            prefix = 0
-            base_bit = bit
-            while bit in table_names:
-                prefix += 1
-                bit = "{}_{}".format(base_bit, prefix)
-            table_names.add(bit)
-
-            if source_type == "csv":
-                tracker = TypeTracker()
-                response = await pyfetch(url)
-                csv_bytes = await response.bytes()
-
-                skiprows = int(${JSON.stringify(settings.skiprows || 0)})
-
-                # Apply skiprows by preprocessing the CSV file if needed
-                csv_lines = csv_bytes.decode('utf-8', errors='ignore').splitlines()
-                if len(csv_lines) > skiprows and skiprows > 0:
-                    csv_lines = csv_lines[skiprows:]
-                    csv_bytes = '\\n'.join(csv_lines).encode('utf-8')
-                with open("csv.csv", "wb") as fp:
-                    fp.write(csv_bytes)
-
-                # Auto-detect CSV delimiter (comma vs semicolon)
-                # Read first few lines to detect the delimiter
-                sample_lines = []
-                lines_iter = iter(csv_bytes.decode('utf-8', errors='ignore').splitlines())
-                for _ in range(min(5, len(csv_bytes.decode('utf-8', errors='ignore').splitlines()))):
-                    try:
-                        sample_lines.append(next(lines_iter))
-                    except StopIteration:
-                        break
-
-                # Count semicolons vs commas in the sample
-                semicolon_count = sum(line.count(';') for line in sample_lines)
-                comma_count = sum(line.count(',') for line in sample_lines)
-
-                # Determine the most likely delimiter
-                if semicolon_count > comma_count and semicolon_count > 0:
-                    # Use semicolon as delimiter
-                    # We need to manually parse CSV with semicolon delimiter
-                    import csv as csv_module
-                    from io import StringIO
-
-                    csv_content = csv_bytes.decode('utf-8', errors='ignore')
-                    csv_reader = csv_module.reader(StringIO(csv_content), delimiter=';')
-                    rows = list(csv_reader)
-
-                    if rows:
-                        # Convert to format expected by sqlite-utils
-                        headers = rows[0]
-                        # Make headers unique by adding suffixes to duplicates
-                        seen = {}
-                        for i, header in enumerate(headers):
-                            if header in seen:
-                                seen[header] += 1
-                                headers[i] = f"{header}_{seen[header]}"
-                            else:
-                                seen[header] = 0
-                        data_rows = rows[1:]
-                        dict_rows = [dict(zip(headers, row)) for row in data_rows]
-
-                        db[bit].insert_all(
-                            tracker.wrap(dict_rows),
-                            alter=True
-                        )
-                else:
-                    # Use default comma delimiter
-                    db[bit].insert_all(
-                        tracker.wrap(rows_from_file(open("csv.csv", "rb"), Format.CSV)[0]),
-                        alter=True
-                    )
-
-                db[bit].transform(
-                    types=tracker.types
-                )
-                
-                # Enable FTS if requested
-                if fts == "true":
-                    # Get all text columns for FTS
-                    columns = [col.name for col in db[bit].columns if col.type in ('TEXT', 'VARCHAR', 'CHAR')]
-                    if columns:
-                        db[bit].enable_fts(columns)
-            elif source_type == "json":
-                pk = None
-                response = await pyfetch(url)
-                with open("json.json", "wb") as fp:
-                    json_bytes = await response.bytes()
-                    try:
-                        json_data = json.loads(json_bytes)
-                    except json.decoder.JSONDecodeError:
-                        # Maybe it's newline-delimited JSON?
-                        # This will raise an unhandled exception if not
-                        json_data = [json.loads(line) for line in json_bytes.splitlines()]
-                if isinstance(json_data, dict) and all(isinstance(v, dict) for v in json_data.values()):
-                    fixed = []
-                    pk = "_key"
-                    for key, value in json_data.items():
-                        value["_key"] = key
-                        fixed.append(value)
-                    json_data = fixed
-                elif isinstance(json_data, dict) and any(isinstance(v, list) for v in json_data.values()):
-                    for key, value in json_data.items():
-                        if isinstance(value, list) and value and isinstance(value[0], dict):
-                            json_data = value
-                            break
-                assert isinstance(json_data, list), "JSON data must be a list of objects"
-                db[bit].insert_all(json_data, pk=pk, alter=True)
-                
-                # Enable FTS if requested
-                if fts == "true":
-                    # Get all text columns for FTS
-                    columns = [col.name for col in db[bit].columns if col.type in ('TEXT', 'VARCHAR', 'CHAR')]
-                    if columns:
-                        db[bit].enable_fts(columns)
-            elif source_type == "parquet":
-                await micropip.install("fastparquet")
-                import fastparquet
-                response = await pyfetch(url)
-                with open("parquet.parquet", "wb") as fp:
-                    fp.write(await response.bytes())
-                df = fastparquet.ParquetFile("parquet.parquet").to_pandas()
-                db[bit].insert_all(df.to_dict(orient="records"), alter=True)
-                
-                # Enable FTS if requested
-                if fts == "true":
-                    # Get all text columns for FTS
-                    columns = [col.name for col in db[bit].columns if col.type in ('TEXT', 'VARCHAR', 'CHAR')]
-                    if columns:
-                        db[bit].enable_fts(columns)
-from datasette.app import Datasette
 ds = Datasette(names, settings={
     "num_sql_threads": 0,
-    "suggest_facets": "off",
+    "suggest_facets": 0,
+    "allow_downloads": 0,
+    "allow_csv_stream": 0,
 }, metadata=metadata, memory=${settings.memory ? 'True' : 'False'})
 await ds.invoke_startup()
     `);
